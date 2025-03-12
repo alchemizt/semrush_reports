@@ -1,0 +1,54 @@
+name: Run Jest & SQLite Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+
+    env:
+      BW_CLIENTID: ${{ secrets.BW_CLIENTID }}
+      BW_CLIENTSECRET: ${{ secrets.BW_CLIENTSECRET }}
+      BW_PASSWORD: ${{ secrets.BW_PASSWORD }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "20"
+
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y chromium-browser chromium-chromedriver
+          pip install -r requirements.txt
+          npm install
+
+      - name: Run Jest Tests
+        run: npm test
+
+
+      - name: Fetch SEMrush Credentials from Bitwarden
+        id: bitwarden
+        uses: bitwarden/sm-action@v1
+        with:
+          client_id: ${{ secrets.BW_CLIENTID }}
+          client_secret: ${{ secrets.BW_CLIENTSECRET }}
+          password: ${{ secrets.BW_PASSWORD }}
+          item_name: "SEMrush"
+
+      - name: Run SEMrush Scraper
+        env:
+          SEMRUSH_USERNAME: ${{ steps.bitwarden.outputs.username }}
+          SEMRUSH_PASSWORD: ${{ steps.bitwarden.outputs.password }}
+        run: python semrush_report.py example.com
+      - name: Run Jest Tests
+        run: npm test

@@ -1,229 +1,140 @@
+import os
+import re
+import time
+import sqlite3
+import sys
+from pathlib import Path
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import time
-import re
-from pathlib import Path
-import sys
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
 
+# Get SEMrush login details from BitWarden
+SEMRUSH_EMAIL = os.getenv("SEMRUSH_USERNAME")
+SEMRUSH_PASSWORD = os.getenv("SEMRUSH_PASSWORD")
 
-# Input your SemRush Login here
-semrush_mail ="XXXXXXXX"
-semrush_password ="XXXXXXX"
+if not SEMRUSH_EMAIL or not SEMRUSH_PASSWORD:
+    print("Error: SEMrush credentials not found in environment variables!")
+    exit(1)
+ 
 
+# Validate websites from command-line arguments
+websites = sys.argv[1:]
+if not websites:
+    print("Usage: python semrush_report.py domain1.com domain2.com ...")
+    sys.exit(1)
 
-# Input Websites (Max 5)
-while True:
-    website = input("Enter your website:").casefold()
-    if not re.match(".*?\.[a-z]{2,}|none",website):
-        print("No Website Detected ! Insert valid domain or URL")
-    else:
-        break
+# Validate domain format
+def validate_domain(domain):
+    return re.match(r".*?\.[a-z]{2,}$", domain) is not None
 
-while True:
-    website1 = input("Enter second website, (if no website type : \"None\") : ").casefold()
-    if not re.match(".*?\.[a-z]{2,}|none",website1):
-        print("No Website Detected ! Insert valid domain or URL")
-    else:
-        break
+websites = [w.lower() for w in websites if validate_domain(w)]
+if not websites:
+    print("Error: No valid domains provided!")
+    sys.exit(1)
 
-if website1 != "none":
-    while True:
-        website2 = input("Enter third website, (if no website type : \"None\") : ").casefold()
-        if not re.match(".*?\.[a-z]{2,}|none", website2):
-            print("No Website Detected ! Insert valid domain or URL")
-        else:
-            break
-if website1 != "none" and website2 != "none":
-    while True:
-        website3 = input("Enter fourth website, (if no website type : \"None\") : ").casefold()
-        if not re.match(".*?\.[a-z]{2,}|none", website3):
-            print("No Website Detected ! Insert valid domain or URL")
-        else:
-            break
-if website1 != "none" and website2 != "none" and website3 != "none":
-    while True:
-        website4 = input("Enter last website, (if no website type : \"None\") : ").casefold()
-        if not re.match(".*?\.[a-z]{2,}|none", website4):
-            print("No Website Detected ! Insert valid domain or URL")
-        else:
-            break
+# Default SEMrush database
+DB_LOCATION = "us"
 
-# Database input + Keep asking until input is in list
-db_list = [
-    "us", "uk", "br", "ca", "au", "fr", "de", "it", "nl", "es", "in", "ru",
-    "jp", "tr", "dk", "mx", "ar", "pl", "be", "ie", "se", "ch", "fi", "hu",
-    "no", "il", "sg", "hk"
-]
-db_input = None
-while db_input not in db_list:
-    if db_input is not None:
-        print("Wrong Data base input, must be one of the one above")
+# Construct SEMrush search URLs
+semrush_urls = [f"https://semrush.com/analytics/organic/positions/?db={DB_LOCATION}&searchType=domain&q={w}" for w in websites]
 
-    db_input = input("Enter yout Data Base ( " +str(db_list) + ") :")
-
-print("Ok let's go !")
-
-# URLs creation
-url_website = "https://semrush.com/analytics/organic/positions/?db=" + db_input + "&searchType=domain&q=" + website
-
-if website1 != "none":
-    url_website1 = "https://semrush.com/analytics/organic/positions/?db=" + db_input + "&searchType=domain&q=" + website1
-if website1 != "none" and website2 !="none":
-    url_website2 = "https://semrush.com/analytics/organic/positions/?db=" + db_input + "&searchType=domain&q=" + website2
-if website1 != "none" and website2 !="none" and website3 != "none":
-    url_website3 = "https://semrush.com/analytics/organic/positions/?db=" + db_input + "&searchType=domain&q=" + website3
-if website1 != "none" and website2 !="none" and website3 != "none" and website4 != "none":
-    url_website4 = "https://semrush.com/analytics/organic/positions/?db=" + db_input + "&searchType=domain&q=" + website4
-
-# Setting up Chrome headless download
-def enable_download_in_headless_chrome(browser, download_dir):
-    #add missing support for chrome "send_command"  to selenium webdriver
-    browser.command_executor._commands["send_command"] = ("POST", '/session/$sessionId/chromium/send_command')
-    #Set up download folder
-    excel_folder = Path.cwd() / "excel"
-    myexcel_folder = str(excel_folder)
-    params = {'cmd': 'Page.setDownloadBehavior', 'params': {'behavior': 'allow', 'downloadPath': myexcel_folder}}
-    browser.execute("send_command", params)
-
-
-
-# Setting up Chrome options
-chrome_folder = Path.cwd() / "driver" / "chromedriver"
-mychrome_folder = str(chrome_folder)
-chrome_options = webdriver.ChromeOptions()
+# Set up Chrome options
+chrome_options = Options()
 chrome_options.add_argument("--incognito")
 chrome_options.add_argument("--lang=en")
-chrome_options.add_argument("--disable-features=NetworkService")
 chrome_options.add_argument("--window-size=1920,1080")
-chrome_options.add_argument('headless')
-browser = webdriver.Chrome(mychrome_folder, options=chrome_options)
+chrome_options.add_argument("--headless")
+chrome_options.add_argument("--no-sandbox")
+chrome_options.add_argument("--disable-dev-shm-usage")
 
-# Setting up Chrome headless download
-enable_download_in_headless_chrome(browser, "c:\temp")
+# Initialize WebDriver
+driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
 
-# Opening a new URL
-source = browser.get(url_website)
-
-# Clicking on login text
-login_icon = WebDriverWait(browser,20).until(EC.element_to_be_clickable((By.XPATH,"//div[contains(text(),'Log in')]")))
-login_icon.click()
-
-# Putting the logins
-login_bar = browser.find_element_by_name("email")
-login_bar.send_keys(semrush_mail)
-mdp_bar = browser.find_element_by_name("password")
-mdp_bar.send_keys(semrush_password)
-
-# Click on logging button
-login_button = WebDriverWait(browser,20).until(EC.element_to_be_clickable((By.CLASS_NAME,"sc-btn__inner")))
-login_button.click()
-
-try:
-    confirm_log = WebDriverWait(browser, 5).until(EC.presence_of_element_located((By.CLASS_NAME, 'srf-line')))
-    print("Login Successful")
-except:
-    error_log = WebDriverWait(browser, 5).until(EC.presence_of_element_located((By.CLASS_NAME, 'sc-notice__body')))
-    print("Wrong Login or Password, try changing it")
-    time.sleep(2)
-    browser.quit()
-    sys.exit()
-
-# Website
-
-#No results
-if website != "none":
-    source = browser.get(url_website)
+def login_to_semrush():
+    """Log into SEMrush using Selenium"""
+    print("Logging into SEMrush...")
+    driver.get("https://www.semrush.com/login")
+    
+    # Enter email
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.NAME, "email"))).send_keys(SEMRUSH_EMAIL)
+    # Enter password
+    driver.find_element(By.NAME, "password").send_keys(SEMRUSH_PASSWORD)
+    # Click login button
+    driver.find_element(By.CLASS_NAME, "sc-btn__inner").click()
+    
     try:
-        noresults = WebDriverWait(browser,3).until(EC.visibility_of_element_located((By.CLASS_NAME,"cl-nothing-found-page__title")))
-        print(website + " status : " + noresults.text)
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CLASS_NAME, "dashboard-selector")))
+        print("Login successful!")
     except:
-#Click on export
-        export_icon = WebDriverWait(browser,20).until(EC.element_to_be_clickable((By.XPATH,"//span[contains(text(),'Export')]")))
-        export_icon.click()
-#Click on excel
-        export_excel = WebDriverWait(browser,20).until(EC.element_to_be_clickable((By.XPATH,"//span[contains(text(),'Excel')]")))
-        export_excel.click()
-        time.sleep(3)
-        print(website + " status : report downloaded")
+        print("Login failed. Check credentials.")
+        driver.quit()
+        sys.exit(1)
 
-# Website 1
-if website1 != "none":
-    source = browser.get(url_website1)
+def scrape_website_data(url, website):
+    """Extract keyword rankings for a website from SEMrush"""
+    print(f"Scraping data for: {website}")
+    driver.get(url)
+    
     try:
-# No results
-        noresults2 = WebDriverWait(browser, 3).until(EC.visibility_of_element_located((By.CLASS_NAME, "cl-nothing-found-page__title")))
-        print(website1 + " status : " + noresults2.text)
-
+        # Check if there's no data
+        no_results = WebDriverWait(driver, 3).until(EC.presence_of_element_located((By.CLASS_NAME, "cl-nothing-found-page__title")))
+        print(f"{website}: No ranking data found.")
+        return None
     except:
-#Click on export
-        export_icon = WebDriverWait(browser,20).until(EC.element_to_be_clickable((By.XPATH,"//span[contains(text(),'Export')]")))
-        export_icon.click()
-#Click on excel
-        export_excel = WebDriverWait(browser,20).until(EC.element_to_be_clickable((By.XPATH,"//span[contains(text(),'Excel')]")))
-        export_excel.click()
-        time.sleep(3)
-        print(website1 + " status : report downloaded")
+        pass
 
-# Website 2
-if website1 != "none" and website2 !="none" :
-    source = browser.get(url_website2)
-
+    # Extract rankings (modify this based on actual table structure)
     try:
-        # No results
-        noresults3 = WebDriverWait(browser, 3).until(EC.visibility_of_element_located((By.CLASS_NAME, "cl-nothing-found-page__title")))
-        print(website2 + " status : " + noresults3.text)
+        keywords = driver.find_elements(By.CSS_SELECTOR, "tr td:nth-child(1)")  # Adjust selector
+        rankings = driver.find_elements(By.CSS_SELECTOR, "tr td:nth-child(2)")  # Adjust selector
 
-    except:
-#Click on export
-        export_icon = WebDriverWait(browser,20).until(EC.element_to_be_clickable((By.XPATH,"//span[contains(text(),'Export')]")))
-        export_icon.click()
-#Click on excel
-        export_excel = WebDriverWait(browser,20).until(EC.element_to_be_clickable((By.XPATH,"//span[contains(text(),'Excel')]")))
-        export_excel.click()
-        time.sleep(3)
-        print(website2 + " status : report downloaded")
+        data = []
+        for k, r in zip(keywords, rankings):
+            keyword = k.text.strip()
+            rank = int(r.text.strip()) if r.text.strip().isdigit() else None
+            if keyword and rank:
+                data.append((website, keyword, rank))
 
-# Website 3
-if website1 != "none" and website2 !="none" and website3 != "none" :
-    source = browser.get(url_website3)
+        print(f"{website}: {len(data)} keywords found.")
+        return data
+    except Exception as e:
+        print(f"Error extracting data for {website}: {e}")
+        return None
 
-    try:
-        # No results
-        noresults4 = WebDriverWait(browser, 3).until(EC.visibility_of_element_located((By.CLASS_NAME, "cl-nothing-found-page__title")))
-        print(website3 + " status : " + noresults4.text)
+def save_to_database(data):
+    """Save scraped data to SQLite"""
+    if not data:
+        return
 
-    except:
-#Click on export
-        export_icon = WebDriverWait(browser,20).until(EC.element_to_be_clickable((By.XPATH,"//span[contains(text(),'Export')]")))
-        export_icon.click()
-#Click on excel
-        export_excel = WebDriverWait(browser,20).until(EC.element_to_be_clickable((By.XPATH,"//span[contains(text(),'Excel')]")))
-        export_excel.click()
-        time.sleep(3)
-        print(website3 + " status : report downloaded")
+    conn = sqlite3.connect("semrush_data.db")
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            website TEXT NOT NULL,
+            keyword TEXT NOT NULL,
+            ranking INTEGER NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    cursor.executemany("INSERT INTO reports (website, keyword, ranking) VALUES (?, ?, ?)", data)
+    conn.commit()
+    conn.close()
+    print(f"Saved {len(data)} records to database.")
 
-# Website 4
-if website1 != "none" and website2 !="none" and website3 != "none" and website4 != "none":
-    source = browser.get(url_website4)
+# Run automation
+login_to_semrush()
 
-    try:
-        # No results
-        noresults5 = WebDriverWait(browser, 3).until(EC.visibility_of_element_located((By.CLASS_NAME, "cl-nothing-found-page__title")))
-        print(website4 + " status : " + noresults5.text)
+for website, url in zip(websites, semrush_urls):
+    results = scrape_website_data(url, website)
+    save_to_database(results)
 
-    except:
-#Click on export
-        export_icon = WebDriverWait(browser,20).until(EC.element_to_be_clickable((By.XPATH,"//span[contains(text(),'Export')]")))
-        export_icon.click()
-#Click on excel
-        export_excel = WebDriverWait(browser,20).until(EC.element_to_be_clickable((By.XPATH,"//span[contains(text(),'Excel')]")))
-        export_excel.click()
-        time.sleep(3)
-        print(website4 + " status : report downloaded")
-
-# Closing Browser
-time.sleep(5)
-browser.quit()
-print("Done ! ")
+# Close WebDriver
+driver.quit()
+print("Scraping complete!")
